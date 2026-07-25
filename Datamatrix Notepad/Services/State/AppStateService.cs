@@ -84,7 +84,7 @@ public sealed class BrowserAppStateStore(IJSRuntime jsRuntime) : IAppStateStore
     }
 }
 
-public sealed class AppStateService(IAppStateStore store)
+public sealed class AppStateService
 {
     public const string StorageKey = "datamatrix-notepad.state.v1";
     public const int MaximumSerializedStateLength = 4_500_000;
@@ -93,7 +93,20 @@ public sealed class AppStateService(IAppStateStore store)
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
+    private readonly IAppStateStore _store;
+    private readonly TimeProvider _timeProvider;
     private StateLoadResult? _loadResult;
+
+    public AppStateService(IAppStateStore store)
+        : this(store, TimeProvider.System)
+    {
+    }
+
+    public AppStateService(IAppStateStore store, TimeProvider timeProvider)
+    {
+        _store = store;
+        _timeProvider = timeProvider;
+    }
 
     public AppState State { get; private set; } = AppState.CreateDefault();
 
@@ -103,6 +116,11 @@ public sealed class AppStateService(IAppStateStore store)
         StatePersistenceStatus.Saved;
 
     public string? PersistenceError { get; private set; }
+
+    public Note? ActiveNote =>
+        State.ActiveNoteId is null
+            ? null
+            : State.Notes.FirstOrDefault(note => note.Id == State.ActiveNoteId.Value);
 
     public event EventHandler? StateChanged;
 
@@ -116,7 +134,7 @@ public sealed class AppStateService(IAppStateStore store)
         string? storedValue;
         try
         {
-            storedValue = await store.ReadAsync(StorageKey);
+            storedValue = await _store.ReadAsync(StorageKey);
         }
         catch
         {
@@ -174,6 +192,86 @@ public sealed class AppStateService(IAppStateStore store)
     public Task<StateSaveResult> SaveNowAsync() =>
         SaveAsync(immediate: true);
 
+    public async Task<Note> CreateNoteAsync()
+    {
+        EnsureLoaded();
+
+        var now = _timeProvider.GetUtcNow();
+        var note = new Note(
+            Guid.NewGuid(),
+            Title: string.Empty,
+            Content: string.Empty,
+            CreatedAtUtc: now,
+            UpdatedAtUtc: now);
+
+        State = State with
+        {
+            ActiveNoteId = note.Id,
+            Notes = [note, .. State.Notes]
+        };
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        await SaveNowAsync();
+        return note;
+    }
+
+    public async Task SelectNoteAsync(Guid noteId)
+    {
+        EnsureLoaded();
+
+        if (State.Notes.All(note => note.Id != noteId))
+        {
+            throw new KeyNotFoundException($"Note {noteId} does not exist.");
+        }
+
+        if (State.ActiveNoteId == noteId)
+        {
+            return;
+        }
+
+        State = State with { ActiveNoteId = noteId };
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        await ScheduleSaveAsync();
+    }
+
+    public async Task UpdateNoteAsync(
+        Guid noteId,
+        string title,
+        string content)
+    {
+        EnsureLoaded();
+        ArgumentNullException.ThrowIfNull(title);
+        ArgumentNullException.ThrowIfNull(content);
+
+        if (title.Length > AppState.MaximumTitleLength)
+        {
+            throw new ArgumentException("Note title is too long.", nameof(title));
+        }
+
+        if (content.Length > AppState.MaximumContentLength)
+        {
+            throw new ArgumentException("Note content is too long.", nameof(content));
+        }
+
+        var existingNote = State.Notes.FirstOrDefault(note => note.Id == noteId)
+            ?? throw new KeyNotFoundException($"Note {noteId} does not exist.");
+        var updatedNote = existingNote with
+        {
+            Title = title,
+            Content = content,
+            UpdatedAtUtc = _timeProvider.GetUtcNow()
+        };
+
+        State = State with
+        {
+            Notes = State.Notes
+                .Select(note => note.Id == noteId ? updatedNote : note)
+                .OrderByDescending(note => note.UpdatedAtUtc)
+                .ToArray()
+        };
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        await ScheduleSaveAsync();
+    }
+
     private async Task<StateSaveResult> SaveAsync(bool immediate)
     {
         State.Validate();
@@ -191,11 +289,11 @@ public sealed class AppStateService(IAppStateStore store)
 
             if (immediate)
             {
-                await store.WriteNowAsync(StorageKey, serializedState);
+                await _store.WriteNowAsync(StorageKey, serializedState);
             }
             else
             {
-                await store.ScheduleWriteAsync(
+                await _store.ScheduleWriteAsync(
                     StorageKey,
                     serializedState,
                     SaveDebounce);
@@ -227,5 +325,14 @@ public sealed class AppStateService(IAppStateStore store)
         PersistenceError = message;
         StateChanged?.Invoke(this, EventArgs.Empty);
         return new StateSaveResult(false, message);
+    }
+
+    private void EnsureLoaded()
+    {
+        if (!IsLoaded)
+        {
+            throw new InvalidOperationException(
+                "Application state must be loaded before it can be changed.");
+        }
     }
 }

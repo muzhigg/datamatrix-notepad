@@ -1,8 +1,12 @@
 @page "/"
 @implements IDisposable
 @using Datamatrix_Notepad.Models
+@using Datamatrix_Notepad.Services.Export
+@using Datamatrix_Notepad.Services.Serial
 @using Datamatrix_Notepad.Services.State
 @inject AppStateService AppState
+@inject NoteExportService NoteExport
+@inject SerialPortService SerialPort
 
 <PageTitle>Datamatrix Notepad</PageTitle>
 
@@ -13,6 +17,56 @@
     </div>
     <a class="text-link" href="settings">Настройки сканера</a>
 </header>
+
+<section class="connection-bar" aria-labelledby="scanner-connection-heading">
+    <div>
+        <h2 id="scanner-connection-heading">Сканер</h2>
+        <p role="status" aria-live="polite">
+            <span class="status-dot status-@SerialPort.State.ToString().ToLowerInvariant()"
+                  aria-hidden="true"></span>
+            <strong>@ConnectionStateText</strong>
+            @if (SerialPort.SelectedPort is not null)
+            {
+                <span> — @CurrentPortLabel</span>
+            }
+        </p>
+    </div>
+
+    <div class="connection-actions">
+        <button type="button"
+                class="primary-button"
+                @onclick="ConnectScannerAsync"
+                disabled="@(!CanConnectScanner)">
+            Выбрать порт
+        </button>
+        <button type="button"
+                class="secondary-button"
+                @onclick="DisconnectScannerAsync"
+                disabled="@(_serialActionInProgress || SerialPort.State is not SerialConnectionState.Connected)">
+            Отключить
+        </button>
+        <a class="text-link" href="settings">Параметры и диагностика</a>
+    </div>
+</section>
+
+@if (_serialSupported is false)
+{
+    <p class="message message-error" role="alert">
+        Web Serial недоступен. Используйте desktop Chrome или Edge по HTTPS.
+    </p>
+}
+else if (_connectionHint is not null)
+{
+    <p class="message" role="status">@_connectionHint</p>
+}
+
+@if (_scanMessage is not null)
+{
+    <p class="message @(_scanMessageIsError ? "message-error" : null)"
+       role="@(_scanMessageIsError ? "alert" : "status")">
+        @_scanMessage
+    </p>
+}
 
 @if (_isLoading)
 {
@@ -48,12 +102,28 @@ else
                 <div @key="activeNote.Id" class="note-editor">
                     <div class="editor-toolbar">
                         <span>Редактирование заметки</span>
-                        <button type="button"
-                                class="danger-text-button"
-                                @onclick="() => RequestNoteDeletion(activeNote)">
-                            Удалить заметку
-                        </button>
+                        <div class="editor-actions">
+                            <button type="button"
+                                    class="primary-button"
+                                    disabled="@_exportInProgress"
+                                    @onclick="() => DownloadNoteAsync(activeNote)">
+                                Скачать
+                            </button>
+                            <button type="button"
+                                    class="danger-text-button"
+                                    @onclick="() => RequestNoteDeletion(activeNote)">
+                                Удалить заметку
+                            </button>
+                        </div>
                     </div>
+
+                    <p class="export-file-name">
+                        Имя файла: <code>@NoteExport.CreateFileName(activeNote)</code>
+                    </p>
+                    @if (_exportError is not null)
+                    {
+                        <p class="message message-error" role="alert">@_exportError</p>
+                    }
 
                     <div class="field">
                         <label for="note-title">Название</label>
@@ -108,6 +178,32 @@ else
     private bool _isLoading = true;
     private StateLoadResult? _loadResult;
     private Note? _notePendingDeletion;
+    private bool? _serialSupported;
+    private bool _serialActionInProgress;
+    private string? _connectionHint;
+    private string? _scanMessage;
+    private bool _scanMessageIsError;
+    private bool _exportInProgress;
+    private string? _exportError;
+
+    private bool CanConnectScanner =>
+        _serialSupported is true &&
+        !_serialActionInProgress &&
+        SerialPort.State is not SerialConnectionState.Connected;
+
+    private string ConnectionStateText => SerialPort.State switch
+    {
+        SerialConnectionState.Disconnected => "не подключён",
+        SerialConnectionState.Connecting => "подключение…",
+        SerialConnectionState.Connected => "подключён",
+        SerialConnectionState.Error => "ошибка подключения",
+        _ => "неизвестно"
+    };
+
+    private string CurrentPortLabel =>
+        SerialPort.SelectedPort is null
+            ? AppState.State.SerialSettings.PortAlias
+            : $"{AppState.State.SerialSettings.PortAlias} ({SerialPort.SelectedPort.DisplayName})";
 
     private string PersistenceStatusText => AppState.PersistenceStatus switch
     {
@@ -120,8 +216,34 @@ else
     protected override async Task OnInitializedAsync()
     {
         AppState.StateChanged += HandleStateChanged;
+        SerialPort.StateChanged += HandleStateChanged;
+        SerialPort.ChunkReceived += HandleChunkReceived;
         _loadResult = await AppState.LoadAsync();
         _isLoading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _loadResult is not { IsSuccess: true })
+        {
+            return;
+        }
+
+        try
+        {
+            _serialSupported = await SerialPort.IsSupportedAsync();
+            if (_serialSupported is true)
+            {
+                await TryReconnectScannerAsync();
+            }
+        }
+        catch (JSException exception)
+        {
+            _serialSupported = false;
+            _connectionHint = exception.Message;
+        }
+
+        StateHasChanged();
     }
 
     private async Task CreateNoteAsync()
@@ -173,6 +295,130 @@ else
         await AppState.DeleteNoteAsync(note.Id);
     }
 
+    private async Task DownloadNoteAsync(Note note)
+    {
+        _exportInProgress = true;
+        _exportError = null;
+        try
+        {
+            await NoteExport.DownloadAsync(note);
+        }
+        catch (JSException exception)
+        {
+            _exportError = $"Не удалось скачать заметку: {exception.Message}";
+        }
+        finally
+        {
+            _exportInProgress = false;
+        }
+    }
+
+    private async Task TryReconnectScannerAsync()
+    {
+        _serialActionInProgress = true;
+        try
+        {
+            var settings = AppState.State.SerialSettings;
+            var result = await SerialPort.TryReconnectAsync(
+                settings.ToConnectionOptions(),
+                new SerialPortInfo(
+                    settings.UsbVendorId,
+                    settings.UsbProductId));
+            _connectionHint = result.Status switch
+            {
+                SerialReconnectStatus.Ambiguous =>
+                    "Найдено несколько разрешённых портов. Выберите нужный порт.",
+                SerialReconnectStatus.NotFound =>
+                    "Разрешённый порт не найден. Выберите порт для сканера.",
+                SerialReconnectStatus.Error => result.ErrorMessage,
+                _ => null
+            };
+        }
+        finally
+        {
+            _serialActionInProgress = false;
+        }
+    }
+
+    private async Task ConnectScannerAsync()
+    {
+        if (!CanConnectScanner)
+        {
+            return;
+        }
+
+        _serialActionInProgress = true;
+        _connectionHint = null;
+        try
+        {
+            var settings = AppState.State.SerialSettings;
+            var result = await SerialPort.SelectAndConnectAsync(
+                settings.ToConnectionOptions());
+
+            if (result.IsCancelled)
+            {
+                _connectionHint = "Выбор порта отменён.";
+            }
+            else if (result.IsConnected && result.Port is not null)
+            {
+                await AppState.UpdateSerialSettingsAsync(
+                    settings with
+                    {
+                        UsbVendorId = result.Port.UsbVendorId,
+                        UsbProductId = result.Port.UsbProductId
+                    },
+                    saveImmediately: true);
+            }
+            else
+            {
+                _connectionHint = result.ErrorMessage;
+            }
+        }
+        finally
+        {
+            _serialActionInProgress = false;
+        }
+    }
+
+    private async Task DisconnectScannerAsync()
+    {
+        _serialActionInProgress = true;
+        try
+        {
+            await SerialPort.DisconnectAsync();
+            _connectionHint = "Порт отключён.";
+        }
+        finally
+        {
+            _serialActionInProgress = false;
+        }
+    }
+
+    private void HandleChunkReceived(object? sender, SerialChunkEventArgs args)
+    {
+        if (args.CompletedCodes.Count == 0)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            var result = await AppState.AppendScannedCodesAsync(
+                args.CompletedCodes);
+            (_scanMessage, _scanMessageIsError) = result.Status switch
+            {
+                ScanAppendStatus.Appended =>
+                    ($"Добавлено кодов: {result.AppendedCount}.", false),
+                ScanAppendStatus.NoActiveNote =>
+                    ("Код получен, но активная заметка не выбрана.", true),
+                ScanAppendStatus.ContentTooLarge =>
+                    ("Код не добавлен: достигнут предел размера заметок.", true),
+                _ => (null, false)
+            };
+            StateHasChanged();
+        });
+    }
+
     private void HandleStateChanged(object? sender, EventArgs args)
     {
         _ = InvokeAsync(StateHasChanged);
@@ -181,5 +427,7 @@ else
     public void Dispose()
     {
         AppState.StateChanged -= HandleStateChanged;
+        SerialPort.StateChanged -= HandleStateChanged;
+        SerialPort.ChunkReceived -= HandleChunkReceived;
     }
 }

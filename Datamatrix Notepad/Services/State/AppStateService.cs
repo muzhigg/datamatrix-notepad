@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using Datamatrix_Notepad.Models;
 using Microsoft.JSInterop;
 
@@ -14,6 +15,18 @@ public enum StatePersistenceStatus
 public sealed record StateLoadResult(bool IsSuccess, string? ErrorMessage);
 
 public sealed record StateSaveResult(bool IsSuccess, string? ErrorMessage);
+
+public enum ScanAppendStatus
+{
+    Appended,
+    NoActiveNote,
+    NoCodes,
+    ContentTooLarge
+}
+
+public sealed record ScanAppendResult(
+    ScanAppendStatus Status,
+    int AppendedCount);
 
 public interface IAppStateStore : IAsyncDisposable
 {
@@ -336,6 +349,79 @@ public sealed class AppStateService
         {
             await ScheduleSaveAsync();
         }
+    }
+
+    public async Task<ScanAppendResult> AppendScannedCodesAsync(
+        IReadOnlyList<string> completedCodes)
+    {
+        EnsureLoaded();
+        ArgumentNullException.ThrowIfNull(completedCodes);
+
+        var codes = completedCodes
+            .Where(code => !string.IsNullOrEmpty(code))
+            .ToArray();
+        if (codes.Length == 0)
+        {
+            return new ScanAppendResult(ScanAppendStatus.NoCodes, 0);
+        }
+
+        if (ActiveNote is not { } activeNote)
+        {
+            return new ScanAppendResult(ScanAppendStatus.NoActiveNote, 0);
+        }
+
+        var otherContentLength = State.Notes
+            .Where(note => note.Id != activeNote.Id)
+            .Sum(note => (long)note.Content.Length);
+        var updatedContentLength = (long)activeNote.Content.Length;
+        var endsWithNewLine = activeNote.Content.EndsWith('\n');
+
+        foreach (var code in codes)
+        {
+            if (updatedContentLength > 0 && !endsWithNewLine)
+            {
+                updatedContentLength++;
+            }
+
+            updatedContentLength += code.Length;
+            endsWithNewLine = code.EndsWith('\n');
+        }
+
+        if (otherContentLength + updatedContentLength >
+            AppState.MaximumContentLength)
+        {
+            return new ScanAppendResult(ScanAppendStatus.ContentTooLarge, 0);
+        }
+
+        var contentBuilder = new StringBuilder(
+            checked((int)updatedContentLength));
+        contentBuilder.Append(activeNote.Content);
+        foreach (var code in codes)
+        {
+            if (contentBuilder.Length > 0 &&
+                contentBuilder[^1] != '\n')
+            {
+                contentBuilder.Append('\n');
+            }
+
+            contentBuilder.Append(code);
+        }
+
+        var updatedNote = activeNote with
+        {
+            Content = contentBuilder.ToString(),
+            UpdatedAtUtc = _timeProvider.GetUtcNow()
+        };
+        State = State with
+        {
+            Notes = State.Notes
+                .Select(note => note.Id == activeNote.Id ? updatedNote : note)
+                .OrderByDescending(note => note.UpdatedAtUtc)
+                .ToArray()
+        };
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        await ScheduleSaveAsync();
+        return new ScanAppendResult(ScanAppendStatus.Appended, codes.Length);
     }
 
     private async Task<StateSaveResult> SaveAsync(bool immediate)

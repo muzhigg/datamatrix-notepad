@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="Datamatrix Notepad/Datamatrix Notepad.csproj" />
+  <Project Path="Datamatrix Notepad.Tests/Datamatrix Notepad.Tests.csproj" />
 </Solution>

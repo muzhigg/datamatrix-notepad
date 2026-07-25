@@ -1,6 +1,6 @@
 # Задачи реализации: Datamatrix Notepad
 
-Статус: черновик для проверки пользователем
+Статус: в работе
 
 План: [tasks/plan.md](plan.md)
 
@@ -12,15 +12,15 @@
 
 **Критерии приёмки:**
 
-- [ ] Тестовый проект входит в `.slnx`, ссылается на приложение и обнаруживается `dotnet test`.
-- [ ] Минимальный smoke-тест проходит, nullable и implicit usings включены.
-- [ ] Release-сборка и проверка форматирования имеют воспроизводимые команды из спецификации.
+- [x] Тестовый проект входит в `.slnx`, ссылается на приложение и обнаруживается `dotnet test`.
+- [x] Минимальный smoke-тест проходит, nullable и implicit usings включены.
+- [x] Release-сборка и проверка форматирования имеют воспроизводимые команды из спецификации.
 
 **Проверка:**
 
-- [ ] `dotnet test ".\Datamatrix Notepad.slnx" --configuration Release`
-- [ ] `dotnet build ".\Datamatrix Notepad.slnx" --configuration Release`
-- [ ] `dotnet format ".\Datamatrix Notepad.slnx" --verify-no-changes`
+- [x] `dotnet test ".\Datamatrix Notepad.slnx" --configuration Release`
+- [x] `dotnet build ".\Datamatrix Notepad.slnx" --configuration Release`
+- [x] `dotnet format ".\Datamatrix Notepad.slnx" --verify-no-changes`
 
 **Зависимости:** нет.
 

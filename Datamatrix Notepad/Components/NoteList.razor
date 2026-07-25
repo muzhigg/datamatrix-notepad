@@ -1,0 +1,39 @@
+@using Datamatrix_Notepad.Models
+
+@if (Notes.Count == 0)
+{
+    <p class="notes-empty">Список пока пуст.</p>
+}
+else
+{
+    <ul class="note-list" aria-label="Сохранённые заметки">
+        @foreach (var note in Notes)
+        {
+            var isActive = note.Id == ActiveNoteId;
+            <li @key="note.Id">
+                <button type="button"
+                        class="note-list-item @(isActive ? "note-list-item-active" : null)"
+                        aria-current="@(isActive ? "true" : null)"
+                        @onclick="() => OnSelect.InvokeAsync(note.Id)">
+                    <span class="note-list-title">
+                        @(string.IsNullOrEmpty(note.Title) ? "Без названия" : note.Title)
+                    </span>
+                    <time datetime="@note.UpdatedAtUtc.ToString("O")">
+                        @note.UpdatedAtUtc.ToLocalTime().ToString("g")
+                    </time>
+                </button>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Note> Notes { get; set; } = [];
+
+    [Parameter]
+    public Guid? ActiveNoteId { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback<Guid> OnSelect { get; set; }
+}

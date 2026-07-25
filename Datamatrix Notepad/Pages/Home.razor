@@ -1,7 +1,150 @@
-﻿@page "/"
+@page "/"
+@implements IDisposable
+@using Datamatrix_Notepad.Models
+@using Datamatrix_Notepad.Services.State
+@inject AppStateService AppState
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Datamatrix Notepad</PageTitle>
 
-<h1>Hello, world!</h1>
+<header class="page-header">
+    <div>
+        <h1>Datamatrix Notepad</h1>
+        <p>Заметки для кодов со сканера DataMatrix</p>
+    </div>
+    <a class="text-link" href="settings">Настройки сканера</a>
+</header>
 
-Welcome to your new Fluent Blazor app.
+@if (_isLoading)
+{
+    <p role="status" aria-busy="true">Загрузка заметок…</p>
+}
+else if (_loadResult is { IsSuccess: false })
+{
+    <section class="message message-error" role="alert">
+        <h2>Не удалось загрузить заметки</h2>
+        <p>@_loadResult.ErrorMessage</p>
+        <p>Исходные данные не были перезаписаны.</p>
+    </section>
+}
+else
+{
+    <div class="notepad-workspace">
+        <aside class="notes-panel" aria-labelledby="notes-heading">
+            <div class="panel-heading">
+                <h2 id="notes-heading">Заметки</h2>
+                <button type="button" class="primary-button" @onclick="CreateNoteAsync">
+                    Новая заметка
+                </button>
+            </div>
+
+            <NoteList Notes="@AppState.State.Notes"
+                      ActiveNoteId="@AppState.State.ActiveNoteId"
+                      OnSelect="SelectNoteAsync"/>
+        </aside>
+
+        <main class="editor-panel">
+            @if (AppState.ActiveNote is { } activeNote)
+            {
+                <div @key="activeNote.Id" class="note-editor">
+                    <div class="field">
+                        <label for="note-title">Название</label>
+                        <input id="note-title"
+                               type="text"
+                               value="@activeNote.Title"
+                               @oninput="args => UpdateTitleAsync(activeNote.Id, args)"
+                               autocomplete="off"/>
+                    </div>
+
+                    <div class="field field-grow">
+                        <label for="note-content">Коды и текст заметки</label>
+                        <textarea id="note-content"
+                                  value="@activeNote.Content"
+                                  @oninput="args => UpdateContentAsync(activeNote.Id, args)"
+                                  spellcheck="false"></textarea>
+                    </div>
+
+                    <p class="save-status"
+                       role="status"
+                       aria-live="polite">
+                        @PersistenceStatusText
+                    </p>
+
+                    @if (AppState.PersistenceError is not null)
+                    {
+                        <p class="message message-error" role="alert">
+                            @AppState.PersistenceError
+                        </p>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="empty-state" role="status">
+                    <h2>Нет заметок</h2>
+                    <p>Создайте заметку, чтобы вводить текст и принимать коды со сканера.</p>
+                    <button type="button" class="primary-button" @onclick="CreateNoteAsync">
+                        Создать заметку
+                    </button>
+                </div>
+            }
+        </main>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private StateLoadResult? _loadResult;
+
+    private string PersistenceStatusText => AppState.PersistenceStatus switch
+    {
+        StatePersistenceStatus.Saving => "Сохранение…",
+        StatePersistenceStatus.Saved => "Сохранено",
+        StatePersistenceStatus.Error => "Ошибка сохранения",
+        _ => string.Empty
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        AppState.StateChanged += HandleStateChanged;
+        _loadResult = await AppState.LoadAsync();
+        _isLoading = false;
+    }
+
+    private async Task CreateNoteAsync()
+    {
+        await AppState.CreateNoteAsync();
+    }
+
+    private async Task SelectNoteAsync(Guid noteId)
+    {
+        await AppState.SelectNoteAsync(noteId);
+    }
+
+    private async Task UpdateTitleAsync(Guid noteId, ChangeEventArgs args)
+    {
+        var activeNote = AppState.State.Notes.Single(note => note.Id == noteId);
+        await AppState.UpdateNoteAsync(
+            noteId,
+            args.Value?.ToString() ?? string.Empty,
+            activeNote.Content);
+    }
+
+    private async Task UpdateContentAsync(Guid noteId, ChangeEventArgs args)
+    {
+        var activeNote = AppState.State.Notes.Single(note => note.Id == noteId);
+        await AppState.UpdateNoteAsync(
+            noteId,
+            activeNote.Title,
+            args.Value?.ToString() ?? string.Empty);
+    }
+
+    private void HandleStateChanged(object? sender, EventArgs args)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        AppState.StateChanged -= HandleStateChanged;
+    }
+}

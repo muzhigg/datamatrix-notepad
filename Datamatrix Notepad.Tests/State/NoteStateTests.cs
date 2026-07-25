@@ -1,3 +1,4 @@
+using Datamatrix_Notepad.Models;
 using Datamatrix_Notepad.Services.State;
 using Xunit;
 
@@ -138,14 +139,53 @@ public sealed class NoteStateTests
             () => service.DeleteNoteAsync(Guid.NewGuid()));
     }
 
+    [Fact]
+    public async Task CreateNoteAsync_RejectsMaximumNoteCountWithoutChangingState()
+    {
+        var existingNotes = Enumerable.Range(0, AppState.MaximumNoteCount)
+            .Select(index => new Note(
+                Guid.NewGuid(),
+                $"Заметка {index}",
+                string.Empty,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow))
+            .ToArray();
+        var initialState = new AppState(
+            AppState.CurrentSchemaVersion,
+            existingNotes[0].Id,
+            existingNotes,
+            SerialSettings.Default);
+        var store = new FakeAppStateStore(initialState);
+        var service = new AppStateService(store);
+        await service.LoadAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            service.CreateNoteAsync);
+
+        Assert.Equal(AppState.MaximumNoteCount, service.State.Notes.Count);
+        Assert.Equal(0, store.ImmediateWriteCount);
+    }
+
     private sealed class FakeAppStateStore : IAppStateStore
     {
+        private readonly string? _storedValue;
+
+        public FakeAppStateStore(AppState? state = null)
+        {
+            _storedValue = state is null
+                ? null
+                : System.Text.Json.JsonSerializer.Serialize(
+                    state,
+                    new System.Text.Json.JsonSerializerOptions(
+                        System.Text.Json.JsonSerializerDefaults.Web));
+        }
+
         public int ScheduledWriteCount { get; private set; }
 
         public int ImmediateWriteCount { get; private set; }
 
         public ValueTask<string?> ReadAsync(string key) =>
-            ValueTask.FromResult<string?>(null);
+            ValueTask.FromResult(_storedValue);
 
         public ValueTask ScheduleWriteAsync(
             string key,

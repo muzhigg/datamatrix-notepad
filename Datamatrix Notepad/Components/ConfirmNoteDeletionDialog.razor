@@ -14,17 +14,24 @@
                 Заметка «@DisplayTitle» будет удалена без возможности восстановления.
             </p>
             <div class="dialog-actions">
+                <span class="focus-sentinel"
+                      tabindex="0"
+                      @onfocus="FocusDeleteButtonAsync"></span>
                 <button @ref="_cancelButton"
                         type="button"
                         class="secondary-button"
                         @onclick="OnCancel">
                     Отмена
                 </button>
-                <button type="button"
+                <button @ref="_deleteButton"
+                        type="button"
                         class="danger-button"
                         @onclick="OnConfirm">
                     Удалить
                 </button>
+                <span class="focus-sentinel"
+                      tabindex="0"
+                      @onfocus="FocusCancelButtonAsync"></span>
             </div>
         </section>
     </div>
@@ -32,6 +39,7 @@
 
 @code {
     private ElementReference _cancelButton;
+    private ElementReference _deleteButton;
     private Guid? _lastFocusedNoteId;
 
     [Parameter]
@@ -69,4 +77,10 @@
             await OnCancel.InvokeAsync();
         }
     }
+
+    private Task FocusCancelButtonAsync() =>
+        _cancelButton.FocusAsync().AsTask();
+
+    private Task FocusDeleteButtonAsync() =>
+        _deleteButton.FocusAsync().AsTask();
 }

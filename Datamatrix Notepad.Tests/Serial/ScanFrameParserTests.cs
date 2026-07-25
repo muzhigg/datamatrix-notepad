@@ -79,4 +79,19 @@ public sealed class ScanFrameParserTests
 
         Assert.Equal("suffix", exception.ParamName);
     }
+
+    [Fact]
+    public void Append_RejectsAndResetsOversizedIncompleteFrame()
+    {
+        var parser = new ScanFrameParser(prefix: string.Empty, suffix: "\r\n");
+        var oversizedChunk = new string(
+            'X',
+            ScanFrameParser.MaximumBufferedLength + 1);
+
+        Assert.Throws<InvalidDataException>(
+            () => parser.Append(oversizedChunk));
+
+        var result = parser.Append("RECOVERED\r\n");
+        Assert.Equal(["RECOVERED"], result);
+    }
 }

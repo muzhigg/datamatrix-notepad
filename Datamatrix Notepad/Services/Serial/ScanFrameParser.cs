@@ -2,6 +2,8 @@ namespace Datamatrix_Notepad.Services.Serial;
 
 public sealed class ScanFrameParser
 {
+    public const int MaximumBufferedLength = 1_000_000;
+
     private readonly string _prefix;
     private readonly string _suffix;
     private string _buffer = string.Empty;
@@ -27,6 +29,13 @@ public sealed class ScanFrameParser
         }
 
         _buffer += chunk;
+        if (_buffer.Length > MaximumBufferedLength)
+        {
+            Reset();
+            throw new InvalidDataException(
+                "Незавершённый код превысил допустимый размер.");
+        }
+
         var completedCodes = new List<string>();
 
         while (TryStartFrame())

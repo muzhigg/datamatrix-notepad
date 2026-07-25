@@ -82,11 +82,21 @@ else if (_loadResult is { IsSuccess: false })
 }
 else
 {
+    @if (_editorError is not null)
+    {
+        <p id="editor-error" class="message message-error" role="alert">
+            @_editorError
+        </p>
+    }
+
     <div class="notepad-workspace">
         <aside class="notes-panel" aria-labelledby="notes-heading">
             <div class="panel-heading">
                 <h2 id="notes-heading">Заметки</h2>
-                <button type="button" class="primary-button" @onclick="CreateNoteAsync">
+                <button @ref="_createNoteButton"
+                        type="button"
+                        class="primary-button"
+                        @onclick="CreateNoteAsync">
                     Новая заметка
                 </button>
             </div>
@@ -96,7 +106,7 @@ else
                       OnSelect="SelectNoteAsync"/>
         </aside>
 
-        <main class="editor-panel">
+        <section class="editor-panel" aria-label="Редактор заметки">
             @if (AppState.ActiveNote is { } activeNote)
             {
                 <div @key="activeNote.Id" class="note-editor">
@@ -111,6 +121,7 @@ else
                             </button>
                             <button type="button"
                                     class="danger-text-button"
+                                    @ref="_deleteNoteButton"
                                     @onclick="() => RequestNoteDeletion(activeNote)">
                                 Удалить заметку
                             </button>
@@ -130,6 +141,7 @@ else
                         <input id="note-title"
                                type="text"
                                value="@activeNote.Title"
+                               aria-describedby="@(_editorError is null ? null : "editor-error")"
                                @oninput="args => UpdateTitleAsync(activeNote.Id, args)"
                                autocomplete="off"/>
                     </div>
@@ -138,6 +150,7 @@ else
                         <label for="note-content">Коды и текст заметки</label>
                         <textarea id="note-content"
                                   value="@activeNote.Content"
+                                  aria-describedby="@(_editorError is null ? null : "editor-error")"
                                   @oninput="args => UpdateContentAsync(activeNote.Id, args)"
                                   spellcheck="false"></textarea>
                     </div>
@@ -166,7 +179,7 @@ else
                     </button>
                 </div>
             }
-        </main>
+        </section>
     </div>
 
     <ConfirmNoteDeletionDialog Note="@_notePendingDeletion"
@@ -185,6 +198,10 @@ else
     private bool _scanMessageIsError;
     private bool _exportInProgress;
     private string? _exportError;
+    private string? _editorError;
+    private ElementReference _deleteNoteButton;
+    private ElementReference _createNoteButton;
+    private bool _restoreFocusAfterDialog;
 
     private bool CanConnectScanner =>
         _serialSupported is true &&
@@ -224,6 +241,19 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_restoreFocusAfterDialog)
+        {
+            _restoreFocusAfterDialog = false;
+            if (AppState.ActiveNote is null)
+            {
+                await _createNoteButton.FocusAsync();
+            }
+            else
+            {
+                await _deleteNoteButton.FocusAsync();
+            }
+        }
+
         if (!firstRender || _loadResult is not { IsSuccess: true })
         {
             return;
@@ -248,7 +278,15 @@ else
 
     private async Task CreateNoteAsync()
     {
-        await AppState.CreateNoteAsync();
+        try
+        {
+            _editorError = null;
+            await AppState.CreateNoteAsync();
+        }
+        catch (InvalidOperationException exception)
+        {
+            _editorError = exception.Message;
+        }
     }
 
     private async Task SelectNoteAsync(Guid noteId)
@@ -259,19 +297,35 @@ else
     private async Task UpdateTitleAsync(Guid noteId, ChangeEventArgs args)
     {
         var activeNote = AppState.State.Notes.Single(note => note.Id == noteId);
-        await AppState.UpdateNoteAsync(
-            noteId,
-            args.Value?.ToString() ?? string.Empty,
-            activeNote.Content);
+        try
+        {
+            _editorError = null;
+            await AppState.UpdateNoteAsync(
+                noteId,
+                args.Value?.ToString() ?? string.Empty,
+                activeNote.Content);
+        }
+        catch (ArgumentException exception)
+        {
+            _editorError = exception.Message;
+        }
     }
 
     private async Task UpdateContentAsync(Guid noteId, ChangeEventArgs args)
     {
         var activeNote = AppState.State.Notes.Single(note => note.Id == noteId);
-        await AppState.UpdateNoteAsync(
-            noteId,
-            activeNote.Title,
-            args.Value?.ToString() ?? string.Empty);
+        try
+        {
+            _editorError = null;
+            await AppState.UpdateNoteAsync(
+                noteId,
+                activeNote.Title,
+                args.Value?.ToString() ?? string.Empty);
+        }
+        catch (ArgumentException exception)
+        {
+            _editorError = exception.Message;
+        }
     }
 
     private void RequestNoteDeletion(Note note)
@@ -282,6 +336,7 @@ else
     private void CancelNoteDeletion()
     {
         _notePendingDeletion = null;
+        _restoreFocusAfterDialog = true;
     }
 
     private async Task ConfirmNoteDeletionAsync()
@@ -291,6 +346,7 @@ else
             return;
         }
 
+        _restoreFocusAfterDialog = true;
         _notePendingDeletion = null;
         await AppState.DeleteNoteAsync(note.Id);
     }
@@ -303,7 +359,7 @@ else
         {
             await NoteExport.DownloadAsync(note);
         }
-        catch (JSException exception)
+        catch (Exception exception)
         {
             _exportError = $"Не удалось скачать заметку: {exception.Message}";
         }

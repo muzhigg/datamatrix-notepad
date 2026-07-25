@@ -358,8 +358,16 @@ public sealed class SerialPortService(IJSRuntime jsRuntime) : IAsyncDisposable
             return Task.CompletedTask;
         }
 
-        var completedCodes = _frameParser.Append(chunk);
-        ChunkReceived?.Invoke(this, new SerialChunkEventArgs(chunk, completedCodes));
+        try
+        {
+            var completedCodes = _frameParser.Append(chunk);
+            ChunkReceived?.Invoke(this, new SerialChunkEventArgs(chunk, completedCodes));
+        }
+        catch (InvalidDataException exception)
+        {
+            DiagnosticErrorReceived?.Invoke(this, exception.Message);
+        }
+
         return Task.CompletedTask;
     }
 

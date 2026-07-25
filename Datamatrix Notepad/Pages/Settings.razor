@@ -98,9 +98,10 @@ else
                        maxlength="400"
                        value="@_prefixDisplay"
                        aria-invalid="@(_prefixError is not null)"
+                       aria-describedby="@(_prefixError is null ? "prefix-help" : "prefix-help prefix-error")"
                        @oninput="UpdatePrefixAsync"
                        autocomplete="off"/>
-                <small>Управляющие символы: <code>\r</code>, <code>\n</code>, <code>\t</code>, <code>\\</code>.</small>
+                <small id="prefix-help">Управляющие символы: <code>\r</code>, <code>\n</code>, <code>\t</code>, <code>\\</code>.</small>
             </div>
 
             <label for="suffix-preset">Суффикс</label>
@@ -119,9 +120,10 @@ else
                        value="@_suffixDisplay"
                        aria-label="Текст суффикса"
                        aria-invalid="@(_suffixError is not null)"
+                       aria-describedby="@(_suffixError is null ? "suffix-help" : "suffix-help suffix-error")"
                        @oninput="UpdateSuffixAsync"
                        autocomplete="off"/>
-                <small>Суффикс обязателен и отмечает конец одного кода.</small>
+                <small id="suffix-help">Суффикс обязателен и отмечает конец одного кода.</small>
             </div>
         </fieldset>
 
@@ -131,11 +133,11 @@ else
         }
         @if (_prefixError is not null)
         {
-            <p class="message message-error" role="alert">@_prefixError</p>
+            <p id="prefix-error" class="message message-error" role="alert">@_prefixError</p>
         }
         @if (_suffixError is not null)
         {
-            <p class="message message-error" role="alert">@_suffixError</p>
+            <p id="suffix-error" class="message message-error" role="alert">@_suffixError</p>
         }
 
         <p class="save-status" role="status" aria-live="polite">

@@ -208,6 +208,11 @@ public sealed class AppStateService
     public async Task<Note> CreateNoteAsync()
     {
         EnsureLoaded();
+        if (State.Notes.Count >= AppState.MaximumNoteCount)
+        {
+            throw new InvalidOperationException(
+                "Достигнут предел количества заметок.");
+        }
 
         var now = _timeProvider.GetUtcNow();
         var note = new Note(

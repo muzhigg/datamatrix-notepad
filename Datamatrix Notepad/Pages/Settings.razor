@@ -1,0 +1,222 @@
+@page "/settings"
+@implements IDisposable
+@using Datamatrix_Notepad.Services.Serial
+@inject SerialPortService SerialPort
+
+<PageTitle>Настройки — Datamatrix Notepad</PageTitle>
+
+<header>
+    <a href="">← К заметкам</a>
+    <h1>Настройки сканера</h1>
+</header>
+
+<section aria-labelledby="connection-heading">
+    <h2 id="connection-heading">Последовательный порт</h2>
+
+    @if (_isSupported is null)
+    {
+        <p role="status">Проверка поддержки Web Serial…</p>
+    }
+    else if (_isSupported is false)
+    {
+        <p role="alert">
+            Web Serial API недоступен. Откройте приложение в desktop-версии Chrome или Edge по HTTPS.
+        </p>
+    }
+    else
+    {
+        <p>
+            Параметры этого диагностического среза:
+            <strong>9600 baud, 8 data bits, no parity, 1 stop bit, no flow control, CRLF</strong>.
+        </p>
+
+        <div>
+            <button type="button"
+                    @onclick="ConnectAsync"
+                    disabled="@(_actionInProgress || SerialPort.State is SerialConnectionState.Connected)">
+                Выбрать и подключить порт
+            </button>
+            <button type="button"
+                    @onclick="DisconnectAsync"
+                    disabled="@(_actionInProgress || SerialPort.State is not SerialConnectionState.Connected)">
+                Отключить
+            </button>
+        </div>
+    }
+
+    <p role="status" aria-live="polite">
+        Состояние: <strong>@ConnectionStateText</strong>
+        @if (SerialPort.SelectedPort is not null)
+        {
+            <span> — @SerialPort.SelectedPort.DisplayName</span>
+        }
+    </p>
+
+    @if (SerialPort.ErrorMessage is not null)
+    {
+        <p role="alert">@SerialPort.ErrorMessage</p>
+    }
+</section>
+
+<section aria-labelledby="diagnostics-heading">
+    <h2 id="diagnostics-heading">Диагностический лог</h2>
+    <p>Показываются данные только выбранного активного порта. Управляющие символы отображаются явно.</p>
+
+    <button type="button" @onclick="ClearLog" disabled="@(_logEntries.Count == 0)">
+        Очистить лог
+    </button>
+
+    <div role="log" aria-live="polite" aria-relevant="additions">
+        @if (_logEntries.Count == 0)
+        {
+            <p>Данных пока нет.</p>
+        }
+        else
+        {
+            <ol>
+                @foreach (var entry in _logEntries)
+                {
+                    <li>
+                        <time datetime="@entry.Timestamp.ToString("O")">
+                            @entry.Timestamp.ToString("HH:mm:ss.fff")
+                        </time>
+                        <code>@entry.Message</code>
+                    </li>
+                }
+            </ol>
+        }
+    </div>
+</section>
+
+@code {
+    private const int MaximumLogEntries = 500;
+    private readonly List<DiagnosticEntry> _logEntries = [];
+    private bool? _isSupported;
+    private bool _actionInProgress;
+
+    private string ConnectionStateText => SerialPort.State switch
+    {
+        SerialConnectionState.Disconnected => "не подключён",
+        SerialConnectionState.Connecting => "подключение…",
+        SerialConnectionState.Connected => "подключён",
+        SerialConnectionState.Error => "ошибка",
+        _ => "неизвестно"
+    };
+
+    protected override void OnInitialized()
+    {
+        SerialPort.StateChanged += HandleStateChanged;
+        SerialPort.ChunkReceived += HandleChunkReceived;
+        SerialPort.DiagnosticErrorReceived += HandleDiagnosticError;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _isSupported = await SerialPort.IsSupportedAsync();
+        }
+        catch (JSException exception)
+        {
+            _isSupported = false;
+            AddLog($"[ERROR] {exception.Message}");
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ConnectAsync()
+    {
+        _actionInProgress = true;
+        try
+        {
+            var result = await SerialPort.SelectAndConnectAsync(SerialConnectionOptions.Default);
+            if (result.IsCancelled)
+            {
+                AddLog("[INFO] Выбор порта отменён.");
+            }
+            else if (result.IsConnected && result.Port is not null)
+            {
+                AddLog($"[INFO] Подключён {result.Port.DisplayName}.");
+            }
+            else if (result.ErrorMessage is not null)
+            {
+                AddLog($"[ERROR] {result.ErrorMessage}");
+            }
+        }
+        finally
+        {
+            _actionInProgress = false;
+        }
+    }
+
+    private async Task DisconnectAsync()
+    {
+        _actionInProgress = true;
+        try
+        {
+            await SerialPort.DisconnectAsync();
+            AddLog("[INFO] Порт отключён.");
+        }
+        finally
+        {
+            _actionInProgress = false;
+        }
+    }
+
+    private void HandleStateChanged(object? sender, EventArgs args)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleChunkReceived(object? sender, SerialChunkEventArgs args)
+    {
+        _ = InvokeAsync(() =>
+        {
+            AddLog($"[RAW] {SerialTextFormatter.MakeControlCharactersVisible(args.RawText)}");
+            foreach (var code in args.CompletedCodes)
+            {
+                AddLog($"[CODE] {SerialTextFormatter.MakeControlCharactersVisible(code)}");
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private void HandleDiagnosticError(object? sender, string message)
+    {
+        _ = InvokeAsync(() =>
+        {
+            AddLog($"[ERROR] {message}");
+            StateHasChanged();
+        });
+    }
+
+    private void AddLog(string message)
+    {
+        _logEntries.Insert(0, new DiagnosticEntry(DateTimeOffset.Now, message));
+        if (_logEntries.Count > MaximumLogEntries)
+        {
+            _logEntries.RemoveRange(MaximumLogEntries, _logEntries.Count - MaximumLogEntries);
+        }
+    }
+
+    private void ClearLog()
+    {
+        _logEntries.Clear();
+    }
+
+    public void Dispose()
+    {
+        SerialPort.StateChanged -= HandleStateChanged;
+        SerialPort.ChunkReceived -= HandleChunkReceived;
+        SerialPort.DiagnosticErrorReceived -= HandleDiagnosticError;
+    }
+
+    private sealed record DiagnosticEntry(DateTimeOffset Timestamp, string Message);
+}

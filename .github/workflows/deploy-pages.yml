@@ -1,0 +1,113 @@
+name: Build and deploy GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore "./Datamatrix Notepad.slnx"
+
+      - name: Verify formatting
+        run: dotnet format "./Datamatrix Notepad.slnx" --verify-no-changes --no-restore
+
+      - name: Test
+        run: dotnet test "./Datamatrix Notepad.slnx" --configuration Release --no-restore --nologo
+
+      - name: Publish
+        run: >-
+          dotnet publish "./Datamatrix Notepad/Datamatrix Notepad.csproj"
+          --configuration Release
+          --no-restore
+          --output "$RUNNER_TEMP/published"
+
+      - name: Prepare Pages base path and SPA fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          owner_name="${GITHUB_REPOSITORY%%/*}"
+          if [[ "$repository_name" == "$owner_name.github.io" ]]; then
+            base_path="/"
+          else
+            base_path="/$repository_name/"
+          fi
+
+          publish_dir="$RUNNER_TEMP/published/wwwroot"
+          sed -i "s#<base href=\"/\" />#<base href=\"$base_path\" />#" "$publish_dir/index.html"
+          rm -f "$publish_dir/index.html.br" "$publish_dir/index.html.gz"
+          cp "$publish_dir/index.html" "$publish_dir/404.html"
+          touch "$publish_dir/.nojekyll"
+
+          grep -F "<base href=\"$base_path\" />" "$publish_dir/index.html"
+          grep -F "<base href=\"$base_path\" />" "$publish_dir/404.html"
+          test -d "$publish_dir/_framework"
+          test -f "$publish_dir/.nojekyll"
+
+          if find "$publish_dir" -type f \( \
+            -name "*.cs" -o \
+            -name "*.csproj" -o \
+            -name "appsettings.Development.json" \
+          \) | grep -q .; then
+            echo "Development/source files were found in the Pages artifact." >&2
+            exit 1
+          fi
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/published/wwwroot
+          include-hidden-files: true
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

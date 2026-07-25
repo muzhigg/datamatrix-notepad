@@ -1,6 +1,12 @@
 bin/
 obj/
+/artifacts/
 /packages/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
 .idea/
 riderModule.iml
 /_ReSharper.Caches/

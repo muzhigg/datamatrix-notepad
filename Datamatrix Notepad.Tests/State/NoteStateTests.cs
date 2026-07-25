@@ -83,6 +83,61 @@ public sealed class NoteStateTests
             () => service.UpdateNoteAsync(Guid.NewGuid(), "Заголовок", "Текст"));
     }
 
+    [Fact]
+    public async Task DeleteNoteAsync_DeletesActiveNoteAndSelectsNextNote()
+    {
+        var store = new FakeAppStateStore();
+        var timeProvider = new TestTimeProvider(
+            DateTimeOffset.Parse("2026-07-25T10:00:00Z"));
+        var service = new AppStateService(store, timeProvider);
+        await service.LoadAsync();
+        var firstNote = await service.CreateNoteAsync();
+        timeProvider.Advance(TimeSpan.FromMinutes(1));
+        var secondNote = await service.CreateNoteAsync();
+        timeProvider.Advance(TimeSpan.FromMinutes(1));
+        await service.CreateNoteAsync();
+        await service.SelectNoteAsync(secondNote.Id);
+        var writesBeforeDeletion = store.ImmediateWriteCount;
+
+        await service.DeleteNoteAsync(secondNote.Id);
+
+        Assert.DoesNotContain(
+            service.State.Notes,
+            note => note.Id == secondNote.Id);
+        Assert.Equal(firstNote.Id, service.State.ActiveNoteId);
+        Assert.Equal(writesBeforeDeletion + 1, store.ImmediateWriteCount);
+    }
+
+    [Fact]
+    public async Task DeleteNoteAsync_DeletesLastNoteAndClearsSelection()
+    {
+        var store = new FakeAppStateStore();
+        var service = new AppStateService(
+            store,
+            new TestTimeProvider(DateTimeOffset.UtcNow));
+        await service.LoadAsync();
+        var note = await service.CreateNoteAsync();
+
+        await service.DeleteNoteAsync(note.Id);
+
+        Assert.Empty(service.State.Notes);
+        Assert.Null(service.State.ActiveNoteId);
+        Assert.Null(service.ActiveNote);
+        Assert.Equal(2, store.ImmediateWriteCount);
+    }
+
+    [Fact]
+    public async Task DeleteNoteAsync_RejectsUnknownNote()
+    {
+        var service = new AppStateService(
+            new FakeAppStateStore(),
+            new TestTimeProvider(DateTimeOffset.UtcNow));
+        await service.LoadAsync();
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(
+            () => service.DeleteNoteAsync(Guid.NewGuid()));
+    }
+
     private sealed class FakeAppStateStore : IAppStateStore
     {
         public int ScheduledWriteCount { get; private set; }

@@ -1,98 +1,260 @@
 @page "/settings"
 @implements IDisposable
+@using System.Globalization
+@using Datamatrix_Notepad.Models
 @using Datamatrix_Notepad.Services.Serial
+@using Datamatrix_Notepad.Services.State
+@inject AppStateService AppState
 @inject SerialPortService SerialPort
 
 <PageTitle>Настройки — Datamatrix Notepad</PageTitle>
 
-<header>
-    <a href="">← К заметкам</a>
-    <h1>Настройки сканера</h1>
+<header class="page-header">
+    <div>
+        <a class="text-link" href="">← К заметкам</a>
+        <h1>Настройки сканера</h1>
+    </div>
 </header>
 
-<section aria-labelledby="connection-heading">
-    <h2 id="connection-heading">Последовательный порт</h2>
-
-    @if (_isSupported is null)
-    {
-        <p role="status">Проверка поддержки Web Serial…</p>
-    }
-    else if (_isSupported is false)
-    {
-        <p role="alert">
-            Web Serial API недоступен. Откройте приложение в desktop-версии Chrome или Edge по HTTPS.
-        </p>
-    }
-    else
-    {
+@if (_loadResult is null)
+{
+    <p role="status" aria-busy="true">Загрузка настроек…</p>
+}
+else if (!_loadResult.IsSuccess)
+{
+    <section class="message message-error" role="alert">
+        <h2>Не удалось загрузить настройки</h2>
+        <p>@_loadResult.ErrorMessage</p>
+        <p>Исходные данные браузера не перезаписаны.</p>
+    </section>
+}
+else
+{
+    <section class="settings-section" aria-labelledby="parameters-heading">
+        <h2 id="parameters-heading">Параметры соединения</h2>
         <p>
-            Параметры этого диагностического среза:
-            <strong>9600 baud, 8 data bits, no parity, 1 stop bit, no flow control, CRLF</strong>.
+            Изменения сохраняются в этом браузере. Новые параметры применятся при следующем подключении.
         </p>
 
-        <div>
-            <button type="button"
-                    @onclick="ConnectAsync"
-                    disabled="@(_actionInProgress || SerialPort.State is SerialConnectionState.Connected)">
-                Выбрать и подключить порт
-            </button>
-            <button type="button"
-                    @onclick="DisconnectAsync"
-                    disabled="@(_actionInProgress || SerialPort.State is not SerialConnectionState.Connected)">
-                Отключить
-            </button>
-        </div>
-    }
+        <fieldset class="settings-grid" disabled="@_actionInProgress">
+            <legend class="visually-hidden">Параметры последовательного порта</legend>
 
-    <p role="status" aria-live="polite">
-        Состояние: <strong>@ConnectionStateText</strong>
-        @if (SerialPort.SelectedPort is not null)
+            <label for="port-alias">Псевдоним порта</label>
+            <input id="port-alias"
+                   type="text"
+                   maxlength="200"
+                   value="@_settings.PortAlias"
+                   @oninput="UpdateAliasAsync"
+                   autocomplete="off"/>
+
+            <label for="baud-rate">Baud rate</label>
+            <input id="baud-rate"
+                   type="number"
+                   min="1"
+                   step="1"
+                   value="@_settings.BaudRate"
+                   @onchange="UpdateBaudRateAsync"/>
+
+            <label for="data-bits">Data bits</label>
+            <select id="data-bits"
+                    value="@_settings.DataBits"
+                    @onchange="UpdateDataBitsAsync">
+                <option value="7">7</option>
+                <option value="8">8</option>
+            </select>
+
+            <label for="parity">Parity</label>
+            <select id="parity"
+                    value="@_settings.Parity"
+                    @onchange="UpdateParityAsync">
+                <option value="none">None</option>
+                <option value="even">Even</option>
+                <option value="odd">Odd</option>
+            </select>
+
+            <label for="stop-bits">Stop bits</label>
+            <select id="stop-bits"
+                    value="@_settings.StopBits"
+                    @onchange="UpdateStopBitsAsync">
+                <option value="1">1</option>
+                <option value="2">2</option>
+            </select>
+
+            <label for="flow-control">Flow control</label>
+            <select id="flow-control"
+                    value="@_settings.FlowControl"
+                    @onchange="UpdateFlowControlAsync">
+                <option value="none">None</option>
+                <option value="hardware">Hardware</option>
+            </select>
+
+            <label for="encoding">Кодировка</label>
+            <input id="encoding" value="UTF-8" readonly/>
+
+            <label for="prefix">Префикс</label>
+            <div class="settings-control">
+                <input id="prefix"
+                       type="text"
+                       maxlength="400"
+                       value="@_prefixDisplay"
+                       aria-invalid="@(_prefixError is not null)"
+                       @oninput="UpdatePrefixAsync"
+                       autocomplete="off"/>
+                <small>Управляющие символы: <code>\r</code>, <code>\n</code>, <code>\t</code>, <code>\\</code>.</small>
+            </div>
+
+            <label for="suffix-preset">Суффикс</label>
+            <div class="settings-control">
+                <select id="suffix-preset"
+                        value="@SuffixPreset"
+                        @onchange="ApplySuffixPresetAsync">
+                    <option value="crlf">CRLF</option>
+                    <option value="cr">CR</option>
+                    <option value="lf">LF</option>
+                    <option value="custom">Пользовательский</option>
+                </select>
+                <input id="suffix"
+                       type="text"
+                       maxlength="400"
+                       value="@_suffixDisplay"
+                       aria-label="Текст суффикса"
+                       aria-invalid="@(_suffixError is not null)"
+                       @oninput="UpdateSuffixAsync"
+                       autocomplete="off"/>
+                <small>Суффикс обязателен и отмечает конец одного кода.</small>
+            </div>
+        </fieldset>
+
+        @if (_settingsError is not null)
         {
-            <span> — @SerialPort.SelectedPort.DisplayName</span>
+            <p class="message message-error" role="alert">@_settingsError</p>
         }
-    </p>
-
-    @if (SerialPort.ErrorMessage is not null)
-    {
-        <p role="alert">@SerialPort.ErrorMessage</p>
-    }
-</section>
-
-<section aria-labelledby="diagnostics-heading">
-    <h2 id="diagnostics-heading">Диагностический лог</h2>
-    <p>Показываются данные только выбранного активного порта. Управляющие символы отображаются явно.</p>
-
-    <button type="button" @onclick="ClearLog" disabled="@(_logEntries.Count == 0)">
-        Очистить лог
-    </button>
-
-    <div role="log" aria-live="polite" aria-relevant="additions">
-        @if (_logEntries.Count == 0)
+        @if (_prefixError is not null)
         {
-            <p>Данных пока нет.</p>
+            <p class="message message-error" role="alert">@_prefixError</p>
+        }
+        @if (_suffixError is not null)
+        {
+            <p class="message message-error" role="alert">@_suffixError</p>
+        }
+
+        <p class="save-status" role="status" aria-live="polite">
+            @PersistenceStatusText
+        </p>
+    </section>
+
+    <section class="settings-section" aria-labelledby="connection-heading">
+        <h2 id="connection-heading">Последовательный порт</h2>
+
+        @if (_isSupported is null)
+        {
+            <p role="status">Проверка поддержки Web Serial…</p>
+        }
+        else if (_isSupported is false)
+        {
+            <p class="message message-error" role="alert">
+                Web Serial API недоступен. Откройте приложение в desktop-версии Chrome или Edge по HTTPS.
+            </p>
         }
         else
         {
-            <ol>
-                @foreach (var entry in _logEntries)
-                {
-                    <li>
-                        <time datetime="@entry.Timestamp.ToString("O")">
-                            @entry.Timestamp.ToString("HH:mm:ss.fff")
-                        </time>
-                        <code>@entry.Message</code>
-                    </li>
-                }
-            </ol>
+            <div class="button-row">
+                <button type="button"
+                        class="primary-button"
+                        @onclick="ConnectAsync"
+                        disabled="@(!CanConnect)">
+                    Выбрать и подключить порт
+                </button>
+                <button type="button"
+                        class="secondary-button"
+                        @onclick="DisconnectAsync"
+                        disabled="@(_actionInProgress || SerialPort.State is not SerialConnectionState.Connected)">
+                    Отключить
+                </button>
+            </div>
         }
-    </div>
-</section>
+
+        <p role="status" aria-live="polite">
+            Состояние: <strong>@ConnectionStateText</strong>
+            @if (SerialPort.SelectedPort is not null)
+            {
+                <span> — @PortLabel</span>
+            }
+        </p>
+
+        @if (SerialPort.ErrorMessage is not null)
+        {
+            <p class="message message-error" role="alert">@SerialPort.ErrorMessage</p>
+        }
+    </section>
+
+    <section class="settings-section" aria-labelledby="diagnostics-heading">
+        <div class="panel-heading">
+            <div>
+                <h2 id="diagnostics-heading">Диагностический лог</h2>
+                <p>Показываются данные только выбранного активного порта.</p>
+            </div>
+            <button type="button"
+                    class="secondary-button"
+                    @onclick="ClearLog"
+                    disabled="@(_logEntries.Count == 0)">
+                Очистить лог
+            </button>
+        </div>
+
+        <div class="diagnostic-log"
+             role="log"
+             aria-live="polite"
+             aria-relevant="additions">
+            @if (_logEntries.Count == 0)
+            {
+                <p>Данных пока нет.</p>
+            }
+            else
+            {
+                <ol>
+                    @foreach (var entry in _logEntries)
+                    {
+                        <li>
+                            <time datetime="@entry.Timestamp.ToString("O")">
+                                @entry.Timestamp.ToString("HH:mm:ss.fff")
+                            </time>
+                            <code>@entry.Message</code>
+                        </li>
+                    }
+                </ol>
+            }
+        </div>
+    </section>
+}
 
 @code {
     private const int MaximumLogEntries = 500;
     private readonly List<DiagnosticEntry> _logEntries = [];
+    private SerialSettings _settings = SerialSettings.Default;
+    private StateLoadResult? _loadResult;
     private bool? _isSupported;
     private bool _actionInProgress;
+    private string _prefixDisplay = string.Empty;
+    private string _suffixDisplay = @"\r\n";
+    private string? _prefixError;
+    private string? _suffixError;
+    private string? _settingsError;
+
+    private bool CanConnect =>
+        _isSupported is true &&
+        !_actionInProgress &&
+        _prefixError is null &&
+        _suffixError is null &&
+        SerialPort.State is not SerialConnectionState.Connected;
+
+    private string PersistenceStatusText => AppState.PersistenceStatus switch
+    {
+        StatePersistenceStatus.Saving => "Сохранение…",
+        StatePersistenceStatus.Saved => "Настройки сохранены",
+        StatePersistenceStatus.Error => "Ошибка сохранения",
+        _ => string.Empty
+    };
 
     private string ConnectionStateText => SerialPort.State switch
     {
@@ -103,16 +265,40 @@
         _ => "неизвестно"
     };
 
-    protected override void OnInitialized()
+    private string PortLabel =>
+        SerialPort.SelectedPort is null
+            ? _settings.PortAlias
+            : $"{_settings.PortAlias} ({SerialPort.SelectedPort.DisplayName})";
+
+    private string SuffixPreset => _suffixDisplay switch
+    {
+        @"\r\n" => "crlf",
+        @"\r" => "cr",
+        @"\n" => "lf",
+        _ => "custom"
+    };
+
+    protected override async Task OnInitializedAsync()
     {
         SerialPort.StateChanged += HandleStateChanged;
         SerialPort.ChunkReceived += HandleChunkReceived;
         SerialPort.DiagnosticErrorReceived += HandleDiagnosticError;
+        AppState.StateChanged += HandleStateChanged;
+
+        _loadResult = await AppState.LoadAsync();
+        if (_loadResult.IsSuccess)
+        {
+            _settings = AppState.State.SerialSettings;
+            _prefixDisplay =
+                SerialTextFormatter.MakeControlCharactersVisible(_settings.Prefix);
+            _suffixDisplay =
+                SerialTextFormatter.MakeControlCharactersVisible(_settings.Suffix);
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender)
+        if (!firstRender || _loadResult is not { IsSuccess: true })
         {
             return;
         }
@@ -120,6 +306,10 @@
         try
         {
             _isSupported = await SerialPort.IsSupportedAsync();
+            if (_isSupported is true)
+            {
+                await TryReconnectAsync();
+            }
         }
         catch (JSException exception)
         {
@@ -130,19 +320,67 @@
         StateHasChanged();
     }
 
-    private async Task ConnectAsync()
+    private async Task TryReconnectAsync()
     {
         _actionInProgress = true;
         try
         {
-            var result = await SerialPort.SelectAndConnectAsync(SerialConnectionOptions.Default);
+            var expectedPort = new SerialPortInfo(
+                _settings.UsbVendorId,
+                _settings.UsbProductId);
+            var result = await SerialPort.TryReconnectAsync(
+                _settings.ToConnectionOptions(),
+                expectedPort);
+
+            switch (result.Status)
+            {
+                case SerialReconnectStatus.Connected:
+                    AddLog($"[INFO] Повторно подключён {PortLabel}.");
+                    break;
+                case SerialReconnectStatus.Ambiguous:
+                    AddLog("[INFO] Найдено несколько подходящих разрешённых портов; выберите порт вручную.");
+                    break;
+                case SerialReconnectStatus.NotFound:
+                    AddLog("[INFO] Ранее разрешённый порт не найден; выберите порт вручную.");
+                    break;
+                case SerialReconnectStatus.Error when result.ErrorMessage is not null:
+                    AddLog($"[ERROR] {result.ErrorMessage}");
+                    break;
+            }
+        }
+        finally
+        {
+            _actionInProgress = false;
+        }
+    }
+
+    private async Task ConnectAsync()
+    {
+        if (!CanConnect)
+        {
+            return;
+        }
+
+        _actionInProgress = true;
+        try
+        {
+            var result = await SerialPort.SelectAndConnectAsync(
+                _settings.ToConnectionOptions());
             if (result.IsCancelled)
             {
                 AddLog("[INFO] Выбор порта отменён.");
             }
             else if (result.IsConnected && result.Port is not null)
             {
-                AddLog($"[INFO] Подключён {result.Port.DisplayName}.");
+                _settings = _settings with
+                {
+                    UsbVendorId = result.Port.UsbVendorId,
+                    UsbProductId = result.Port.UsbProductId
+                };
+                await AppState.UpdateSerialSettingsAsync(
+                    _settings,
+                    saveImmediately: true);
+                AddLog($"[INFO] Подключён {PortLabel}.");
             }
             else if (result.ErrorMessage is not null)
             {
@@ -169,6 +407,162 @@
         }
     }
 
+    private Task UpdateAliasAsync(ChangeEventArgs args) =>
+        SaveSettingsAsync(_settings with
+        {
+            PortAlias = args.Value?.ToString() ?? string.Empty
+        });
+
+    private async Task UpdateBaudRateAsync(ChangeEventArgs args)
+    {
+        if (!int.TryParse(
+                args.Value?.ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var baudRate) ||
+            baudRate <= 0)
+        {
+            _settingsError = "Baud rate должен быть положительным целым числом.";
+            return;
+        }
+
+        await SaveSettingsAsync(_settings with { BaudRate = baudRate });
+    }
+
+    private Task UpdateDataBitsAsync(ChangeEventArgs args) =>
+        SaveIntegerSettingAsync(
+            args,
+            value => _settings with { DataBits = value });
+
+    private Task UpdateStopBitsAsync(ChangeEventArgs args) =>
+        SaveIntegerSettingAsync(
+            args,
+            value => _settings with { StopBits = value });
+
+    private Task UpdateParityAsync(ChangeEventArgs args) =>
+        SaveSettingsAsync(_settings with
+        {
+            Parity = args.Value?.ToString() ?? string.Empty
+        });
+
+    private Task UpdateFlowControlAsync(ChangeEventArgs args) =>
+        SaveSettingsAsync(_settings with
+        {
+            FlowControl = args.Value?.ToString() ?? string.Empty
+        });
+
+    private async Task UpdatePrefixAsync(ChangeEventArgs args)
+    {
+        _prefixDisplay = args.Value?.ToString() ?? string.Empty;
+        if (!TryReadDelimiter(
+                _prefixDisplay,
+                required: false,
+                out var prefix,
+                out _prefixError))
+        {
+            return;
+        }
+
+        await SaveSettingsAsync(_settings with { Prefix = prefix });
+    }
+
+    private async Task UpdateSuffixAsync(ChangeEventArgs args)
+    {
+        _suffixDisplay = args.Value?.ToString() ?? string.Empty;
+        if (!TryReadDelimiter(
+                _suffixDisplay,
+                required: true,
+                out var suffix,
+                out _suffixError))
+        {
+            return;
+        }
+
+        await SaveSettingsAsync(_settings with { Suffix = suffix });
+    }
+
+    private async Task ApplySuffixPresetAsync(ChangeEventArgs args)
+    {
+        var preset = args.Value?.ToString();
+        if (preset == "custom")
+        {
+            return;
+        }
+
+        _suffixDisplay = preset switch
+        {
+            "cr" => @"\r",
+            "lf" => @"\n",
+            _ => @"\r\n"
+        };
+        await UpdateSuffixAsync(new ChangeEventArgs { Value = _suffixDisplay });
+    }
+
+    private async Task SaveIntegerSettingAsync(
+        ChangeEventArgs args,
+        Func<int, SerialSettings> createSettings)
+    {
+        if (!int.TryParse(
+                args.Value?.ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var value))
+        {
+            _settingsError = "Выбрано недопустимое числовое значение.";
+            return;
+        }
+
+        await SaveSettingsAsync(createSettings(value));
+    }
+
+    private async Task SaveSettingsAsync(SerialSettings settings)
+    {
+        try
+        {
+            settings.Validate();
+            _settings = settings;
+            _settingsError = null;
+            await AppState.UpdateSerialSettingsAsync(settings);
+        }
+        catch (Exception exception)
+            when (exception is ArgumentException or InvalidDataException)
+        {
+            _settingsError = exception.Message;
+        }
+    }
+
+    private static bool TryReadDelimiter(
+        string displayValue,
+        bool required,
+        out string delimiter,
+        out string? error)
+    {
+        if (!SerialTextFormatter.TryParseControlCharacters(
+                displayValue,
+                out delimiter))
+        {
+            error =
+                @"Допустимы только последовательности \r, \n, \t и \\.";
+            return false;
+        }
+
+        if (required && delimiter.Length == 0)
+        {
+            error = "Суффикс не может быть пустым.";
+            return false;
+        }
+
+        if (delimiter.Length > SerialConnectionOptions.MaximumDelimiterLength)
+        {
+            error =
+                $"Префикс и суффикс не могут быть длиннее {SerialConnectionOptions.MaximumDelimiterLength} символов.";
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+
     private void HandleStateChanged(object? sender, EventArgs args)
     {
         _ = InvokeAsync(StateHasChanged);
@@ -178,10 +572,12 @@
     {
         _ = InvokeAsync(() =>
         {
-            AddLog($"[RAW] {SerialTextFormatter.MakeControlCharactersVisible(args.RawText)}");
+            AddLog(
+                $"[RAW] [{PortLabel}] {SerialTextFormatter.MakeControlCharactersVisible(args.RawText)}");
             foreach (var code in args.CompletedCodes)
             {
-                AddLog($"[CODE] {SerialTextFormatter.MakeControlCharactersVisible(code)}");
+                AddLog(
+                    $"[CODE] [{PortLabel}] {SerialTextFormatter.MakeControlCharactersVisible(code)}");
             }
 
             StateHasChanged();
@@ -192,7 +588,7 @@
     {
         _ = InvokeAsync(() =>
         {
-            AddLog($"[ERROR] {message}");
+            AddLog($"[ERROR] [{PortLabel}] {message}");
             StateHasChanged();
         });
     }
@@ -202,7 +598,9 @@
         _logEntries.Insert(0, new DiagnosticEntry(DateTimeOffset.Now, message));
         if (_logEntries.Count > MaximumLogEntries)
         {
-            _logEntries.RemoveRange(MaximumLogEntries, _logEntries.Count - MaximumLogEntries);
+            _logEntries.RemoveRange(
+                MaximumLogEntries,
+                _logEntries.Count - MaximumLogEntries);
         }
     }
 
@@ -216,7 +614,10 @@
         SerialPort.StateChanged -= HandleStateChanged;
         SerialPort.ChunkReceived -= HandleChunkReceived;
         SerialPort.DiagnosticErrorReceived -= HandleDiagnosticError;
+        AppState.StateChanged -= HandleStateChanged;
     }
 
-    private sealed record DiagnosticEntry(DateTimeOffset Timestamp, string Message);
+    private sealed record DiagnosticEntry(
+        DateTimeOffset Timestamp,
+        string Message);
 }

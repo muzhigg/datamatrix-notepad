@@ -28,24 +28,40 @@ export async function requestAndOpen(options, callbackReference) {
         throw error;
     }
 
-    // baudRate is required; the remaining values are explicit approved defaults.
-    // https://wicg.github.io/serial/#serialoptions-dictionary
-    await selectedPort.open({
-        baudRate: options.baudRate,
-        dataBits: options.dataBits,
-        parity: options.parity,
-        stopBits: options.stopBits,
-        flowControl: options.flowControl
-    });
-
-    activePort = selectedPort;
-    dotNetReference = callbackReference;
-    isClosing = false;
-    readLoopPromise = readFromPort(selectedPort, callbackReference);
-
-    const info = selectedPort.getInfo();
+    const info = await openPort(selectedPort, options, callbackReference);
     return {
         cancelled: false,
+        usbVendorId: info.usbVendorId,
+        usbProductId: info.usbProductId
+    };
+}
+
+export async function openPreviouslyGranted(
+    options,
+    expectedVendorId,
+    expectedProductId,
+    callbackReference) {
+    if (!isSupported()) {
+        throw new Error("Web Serial API недоступен в этом браузере.");
+    }
+
+    await close();
+
+    const permittedPorts = await navigator.serial.getPorts();
+    const matchingPorts = permittedPorts.filter(port =>
+        matchesSavedIdentifiers(port, expectedVendorId, expectedProductId));
+
+    if (matchingPorts.length === 0) {
+        return { status: "notFound" };
+    }
+
+    if (matchingPorts.length > 1) {
+        return { status: "ambiguous" };
+    }
+
+    const info = await openPort(matchingPorts[0], options, callbackReference);
+    return {
+        status: "connected",
         usbVendorId: info.usbVendorId,
         usbProductId: info.usbProductId
     };
@@ -136,6 +152,38 @@ async function readFromPort(port, callbackReference) {
             await callbackReference.invokeMethodAsync("NotifyDisconnectedAsync");
         }
     }
+}
+
+async function openPort(port, options, callbackReference) {
+    // baudRate is required; the remaining values are explicit approved defaults.
+    // https://wicg.github.io/serial/#serialoptions-dictionary
+    await port.open({
+        baudRate: options.baudRate,
+        dataBits: options.dataBits,
+        parity: options.parity,
+        stopBits: options.stopBits,
+        flowControl: options.flowControl
+    });
+
+    activePort = port;
+    dotNetReference = callbackReference;
+    isClosing = false;
+    readLoopPromise = readFromPort(port, callbackReference);
+    return port.getInfo();
+}
+
+function matchesSavedIdentifiers(port, expectedVendorId, expectedProductId) {
+    const info = port.getInfo();
+    const vendorMatches =
+        expectedVendorId === null ||
+        expectedVendorId === undefined ||
+        info.usbVendorId === expectedVendorId;
+    const productMatches =
+        expectedProductId === null ||
+        expectedProductId === undefined ||
+        info.usbProductId === expectedProductId;
+
+    return vendorMatches && productMatches;
 }
 
 function describeError(error) {

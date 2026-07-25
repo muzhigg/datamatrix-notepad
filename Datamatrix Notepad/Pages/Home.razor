@@ -46,6 +46,15 @@ else
             @if (AppState.ActiveNote is { } activeNote)
             {
                 <div @key="activeNote.Id" class="note-editor">
+                    <div class="editor-toolbar">
+                        <span>Редактирование заметки</span>
+                        <button type="button"
+                                class="danger-text-button"
+                                @onclick="() => RequestNoteDeletion(activeNote)">
+                            Удалить заметку
+                        </button>
+                    </div>
+
                     <div class="field">
                         <label for="note-title">Название</label>
                         <input id="note-title"
@@ -89,11 +98,16 @@ else
             }
         </main>
     </div>
+
+    <ConfirmNoteDeletionDialog Note="@_notePendingDeletion"
+                               OnCancel="CancelNoteDeletion"
+                               OnConfirm="ConfirmNoteDeletionAsync"/>
 }
 
 @code {
     private bool _isLoading = true;
     private StateLoadResult? _loadResult;
+    private Note? _notePendingDeletion;
 
     private string PersistenceStatusText => AppState.PersistenceStatus switch
     {
@@ -136,6 +150,27 @@ else
             noteId,
             activeNote.Title,
             args.Value?.ToString() ?? string.Empty);
+    }
+
+    private void RequestNoteDeletion(Note note)
+    {
+        _notePendingDeletion = note;
+    }
+
+    private void CancelNoteDeletion()
+    {
+        _notePendingDeletion = null;
+    }
+
+    private async Task ConfirmNoteDeletionAsync()
+    {
+        if (_notePendingDeletion is not { } note)
+        {
+            return;
+        }
+
+        _notePendingDeletion = null;
+        await AppState.DeleteNoteAsync(note.Id);
     }
 
     private void HandleStateChanged(object? sender, EventArgs args)

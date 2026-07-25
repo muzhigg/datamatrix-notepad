@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.JSInterop;
 
 namespace Datamatrix_Notepad.Services.Serial;
@@ -19,6 +20,8 @@ public sealed record SerialConnectionOptions(
     string Prefix,
     string Suffix)
 {
+    public const int MaximumDelimiterLength = 100;
+
     public static SerialConnectionOptions Default { get; } = new(
         BaudRate: 9600,
         DataBits: 8,
@@ -55,9 +58,21 @@ public sealed record SerialConnectionOptions(
             throw new ArgumentException("Flow control must be none or hardware.", nameof(FlowControl));
         }
 
+        if (Prefix is null)
+        {
+            throw new ArgumentNullException(nameof(Prefix));
+        }
+
         if (string.IsNullOrEmpty(Suffix))
         {
             throw new ArgumentException("Suffix must not be empty.", nameof(Suffix));
+        }
+
+        if (Prefix.Length > MaximumDelimiterLength ||
+            Suffix.Length > MaximumDelimiterLength)
+        {
+            throw new ArgumentException(
+                $"Prefix and suffix must not exceed {MaximumDelimiterLength} characters.");
         }
     }
 }
@@ -76,6 +91,22 @@ public sealed record SerialConnectResult(
     SerialPortInfo? Port,
     string? ErrorMessage);
 
+public enum SerialReconnectStatus
+{
+    Connected,
+    NotFound,
+    Ambiguous,
+    Error
+}
+
+public sealed record SerialReconnectResult(
+    SerialReconnectStatus Status,
+    SerialPortInfo? Port,
+    string? ErrorMessage)
+{
+    public bool IsConnected => Status == SerialReconnectStatus.Connected;
+}
+
 public sealed record SerialChunkEventArgs(
     string RawText,
     IReadOnlyList<string> CompletedCodes);
@@ -87,9 +118,56 @@ public static class SerialTextFormatter
         ArgumentNullException.ThrowIfNull(value);
 
         return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\r", "\\r", StringComparison.Ordinal)
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace("\t", "\\t", StringComparison.Ordinal);
+    }
+
+    public static bool TryParseControlCharacters(
+        string displayValue,
+        out string value)
+    {
+        ArgumentNullException.ThrowIfNull(displayValue);
+
+        var builder = new StringBuilder(displayValue.Length);
+        for (var index = 0; index < displayValue.Length; index++)
+        {
+            var character = displayValue[index];
+            if (character != '\\')
+            {
+                builder.Append(character);
+                continue;
+            }
+
+            if (++index >= displayValue.Length)
+            {
+                value = string.Empty;
+                return false;
+            }
+
+            switch (displayValue[index])
+            {
+                case '\\':
+                    builder.Append('\\');
+                    break;
+                case 'r':
+                    builder.Append('\r');
+                    break;
+                case 'n':
+                    builder.Append('\n');
+                    break;
+                case 't':
+                    builder.Append('\t');
+                    break;
+                default:
+                    value = string.Empty;
+                    return false;
+            }
+        }
+
+        value = builder.ToString();
+        return true;
     }
 }
 
@@ -162,6 +240,88 @@ public sealed class SerialPortService(IJSRuntime jsRuntime) : IAsyncDisposable
             var errorMessage = $"Не удалось подключить порт: {exception.Message}";
             SetState(SerialConnectionState.Error, errorMessage);
             return new SerialConnectResult(false, false, null, errorMessage);
+        }
+        finally
+        {
+            _connectionLock.Release();
+        }
+    }
+
+    public async Task<SerialReconnectResult> TryReconnectAsync(
+        SerialConnectionOptions options,
+        SerialPortInfo? expectedPort)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(options);
+        options.Validate();
+
+        await _connectionLock.WaitAsync();
+        try
+        {
+            if (State == SerialConnectionState.Connected &&
+                SelectedPort is not null)
+            {
+                return new SerialReconnectResult(
+                    SerialReconnectStatus.Connected,
+                    SelectedPort,
+                    null);
+            }
+
+            SetState(SerialConnectionState.Connecting);
+            _frameParser = new ScanFrameParser(options.Prefix, options.Suffix);
+            _selfReference ??= DotNetObjectReference.Create(this);
+
+            var module = await GetModuleAsync();
+            var reconnectResult = await module.InvokeAsync<BrowserReconnectResult>(
+                "openPreviouslyGranted",
+                options,
+                expectedPort?.UsbVendorId,
+                expectedPort?.UsbProductId,
+                _selfReference);
+
+            if (reconnectResult.Status == "notFound")
+            {
+                _frameParser = null;
+                SetState(SerialConnectionState.Disconnected);
+                return new SerialReconnectResult(
+                    SerialReconnectStatus.NotFound,
+                    null,
+                    null);
+            }
+
+            if (reconnectResult.Status == "ambiguous")
+            {
+                _frameParser = null;
+                SetState(SerialConnectionState.Disconnected);
+                return new SerialReconnectResult(
+                    SerialReconnectStatus.Ambiguous,
+                    null,
+                    null);
+            }
+
+            if (reconnectResult.Status != "connected")
+            {
+                throw new JSException("Браузер вернул неизвестный результат подключения.");
+            }
+
+            SelectedPort = new SerialPortInfo(
+                ToUShort(reconnectResult.UsbVendorId),
+                ToUShort(reconnectResult.UsbProductId));
+            SetState(SerialConnectionState.Connected);
+            return new SerialReconnectResult(
+                SerialReconnectStatus.Connected,
+                SelectedPort,
+                null);
+        }
+        catch (JSException exception)
+        {
+            var errorMessage =
+                $"Не удалось повторно подключить разрешённый порт: {exception.Message}";
+            SetState(SerialConnectionState.Error, errorMessage);
+            return new SerialReconnectResult(
+                SerialReconnectStatus.Error,
+                null,
+                errorMessage);
         }
         finally
         {
@@ -300,6 +460,11 @@ public sealed class SerialPortService(IJSRuntime jsRuntime) : IAsyncDisposable
 
     private sealed record BrowserPortSelection(
         bool Cancelled,
+        int? UsbVendorId,
+        int? UsbProductId);
+
+    private sealed record BrowserReconnectResult(
+        string Status,
         int? UsbVendorId,
         int? UsbProductId);
 }

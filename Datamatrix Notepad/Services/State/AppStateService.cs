@@ -272,6 +272,72 @@ public sealed class AppStateService
         await ScheduleSaveAsync();
     }
 
+    public async Task DeleteNoteAsync(Guid noteId)
+    {
+        EnsureLoaded();
+
+        var deletedIndex = -1;
+        for (var index = 0; index < State.Notes.Count; index++)
+        {
+            if (State.Notes[index].Id == noteId)
+            {
+                deletedIndex = index;
+                break;
+            }
+        }
+
+        if (deletedIndex < 0)
+        {
+            throw new KeyNotFoundException($"Note {noteId} does not exist.");
+        }
+
+        var remainingNotes = State.Notes
+            .Where(note => note.Id != noteId)
+            .ToArray();
+        var activeNoteId = State.ActiveNoteId;
+
+        if (activeNoteId == noteId)
+        {
+            activeNoteId = remainingNotes.Length == 0
+                ? null
+                : remainingNotes[Math.Min(deletedIndex, remainingNotes.Length - 1)].Id;
+        }
+
+        State = State with
+        {
+            ActiveNoteId = activeNoteId,
+            Notes = remainingNotes
+        };
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        await SaveNowAsync();
+    }
+
+    public async Task UpdateSerialSettingsAsync(
+        SerialSettings settings,
+        bool saveImmediately = false)
+    {
+        EnsureLoaded();
+        ArgumentNullException.ThrowIfNull(settings);
+        settings.Validate();
+
+        if (State.SerialSettings == settings)
+        {
+            return;
+        }
+
+        State = State with { SerialSettings = settings };
+        StateChanged?.Invoke(this, EventArgs.Empty);
+
+        if (saveImmediately)
+        {
+            await SaveNowAsync();
+        }
+        else
+        {
+            await ScheduleSaveAsync();
+        }
+    }
+
     private async Task<StateSaveResult> SaveAsync(bool immediate)
     {
         State.Validate();

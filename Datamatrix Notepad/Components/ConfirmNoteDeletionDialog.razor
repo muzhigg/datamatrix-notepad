@@ -1,0 +1,72 @@
+@using Datamatrix_Notepad.Models
+
+@if (Note is not null)
+{
+    <div class="dialog-backdrop"
+         @onkeydown="HandleKeyDownAsync">
+        <section class="confirmation-dialog"
+                 role="alertdialog"
+                 aria-modal="true"
+                 aria-labelledby="delete-dialog-title"
+                 aria-describedby="delete-dialog-description">
+            <h2 id="delete-dialog-title">Удалить заметку?</h2>
+            <p id="delete-dialog-description">
+                Заметка «@DisplayTitle» будет удалена без возможности восстановления.
+            </p>
+            <div class="dialog-actions">
+                <button @ref="_cancelButton"
+                        type="button"
+                        class="secondary-button"
+                        @onclick="OnCancel">
+                    Отмена
+                </button>
+                <button type="button"
+                        class="danger-button"
+                        @onclick="OnConfirm">
+                    Удалить
+                </button>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private ElementReference _cancelButton;
+    private Guid? _lastFocusedNoteId;
+
+    [Parameter]
+    public Note? Note { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback OnCancel { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback OnConfirm { get; set; }
+
+    private string DisplayTitle =>
+        string.IsNullOrWhiteSpace(Note?.Title)
+            ? "Без названия"
+            : Note.Title;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Note is not null && _lastFocusedNoteId != Note.Id)
+        {
+            _lastFocusedNoteId = Note.Id;
+            await _cancelButton.FocusAsync();
+        }
+
+        if (Note is null)
+        {
+            _lastFocusedNoteId = null;
+        }
+    }
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+}

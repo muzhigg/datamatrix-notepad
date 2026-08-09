@@ -89,7 +89,12 @@ else
             </select>
 
             <label for="encoding">Кодировка</label>
-            <input id="encoding" value="UTF-8" readonly/>
+            <select id="encoding"
+                    value="@_settings.Encoding"
+                    @onchange="UpdateEncodingAsync">
+                <option value="utf-8">UTF-8 / ASCII</option>
+                <option value="utf-16be">UTF-16BE</option>
+            </select>
 
             <label for="prefix">Префикс</label>
             <div class="settings-control">
@@ -451,6 +456,12 @@ else
         SaveSettingsAsync(_settings with
         {
             FlowControl = args.Value?.ToString() ?? string.Empty
+        });
+
+    private Task UpdateEncodingAsync(ChangeEventArgs args) =>
+        SaveSettingsAsync(_settings with
+        {
+            Encoding = args.Value?.ToString() ?? string.Empty
         });
 
     private async Task UpdatePrefixAsync(ChangeEventArgs args)

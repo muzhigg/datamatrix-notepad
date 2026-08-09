@@ -110,11 +110,52 @@ public sealed class SerialSettingsTests
         Assert.Throws<ArgumentException>(settings.Validate);
     }
 
+    [Fact]
+    public void Validate_Utf16BigEndianEncoding_IsSupported()
+    {
+        var settings = SerialSettings.Default with { Encoding = "utf-16be" };
+
+        settings.Validate();
+    }
+
+    [Fact]
+    public void Validate_UnsupportedEncoding_IsRejected()
+    {
+        var settings = SerialSettings.Default with { Encoding = "utf-16le" };
+
+        Assert.Throws<InvalidDataException>(settings.Validate);
+    }
+
+    [Fact]
+    public void ToConnectionOptions_Utf16BigEndian_PropagatesEncoding()
+    {
+        var settings = SerialSettings.Default with { Encoding = "utf-16be" };
+
+        var options = settings.ToConnectionOptions();
+
+        Assert.Equal("utf-16be", options.Encoding);
+    }
+
+    [Fact]
+    public async Task UpdateSerialSettingsAsync_Utf16BigEndian_SerializesEncoding()
+    {
+        var store = new FakeAppStateStore();
+        var service = new AppStateService(store);
+        await service.LoadAsync();
+        var settings = SerialSettings.Default with { Encoding = "utf-16be" };
+
+        await service.UpdateSerialSettingsAsync(settings);
+
+        Assert.Contains("\"encoding\":\"utf-16be\"", store.LastScheduledValue);
+    }
+
     private sealed class FakeAppStateStore : IAppStateStore
     {
         public int ScheduledWriteCount { get; private set; }
 
         public int ImmediateWriteCount { get; private set; }
+
+        public string? LastScheduledValue { get; private set; }
 
         public ValueTask<string?> ReadAsync(string key) =>
             ValueTask.FromResult<string?>(null);
@@ -124,6 +165,7 @@ public sealed class SerialSettingsTests
             string value,
             TimeSpan debounce)
         {
+            LastScheduledValue = value;
             ScheduledWriteCount++;
             return ValueTask.CompletedTask;
         }

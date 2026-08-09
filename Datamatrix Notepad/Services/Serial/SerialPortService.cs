@@ -17,10 +17,13 @@ public sealed record SerialConnectionOptions(
     string Parity,
     int StopBits,
     string FlowControl,
+    string Encoding,
     string Prefix,
     string Suffix)
 {
     public const int MaximumDelimiterLength = 100;
+    public const string Utf8Encoding = "utf-8";
+    public const string Utf16BigEndianEncoding = "utf-16be";
 
     public static SerialConnectionOptions Default { get; } = new(
         BaudRate: 9600,
@@ -28,8 +31,16 @@ public sealed record SerialConnectionOptions(
         Parity: "none",
         StopBits: 1,
         FlowControl: "none",
+        Encoding: Utf8Encoding,
         Prefix: string.Empty,
         Suffix: "\r\n");
+
+    public static bool IsSupportedEncoding(string? encoding) =>
+        string.Equals(encoding, Utf8Encoding, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(
+            encoding,
+            Utf16BigEndianEncoding,
+            StringComparison.OrdinalIgnoreCase);
 
     public void Validate()
     {
@@ -56,6 +67,13 @@ public sealed record SerialConnectionOptions(
         if (FlowControl is not ("none" or "hardware"))
         {
             throw new ArgumentException("Flow control must be none or hardware.", nameof(FlowControl));
+        }
+
+        if (!IsSupportedEncoding(Encoding))
+        {
+            throw new ArgumentException(
+                "Encoding must be utf-8 or utf-16be.",
+                nameof(Encoding));
         }
 
         if (Prefix is null)

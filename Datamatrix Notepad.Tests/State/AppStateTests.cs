@@ -29,6 +29,7 @@ public sealed class AppStateTests
         var expected = AppState.CreateDefault() with
         {
             ActiveNoteId = noteId,
+            SerialSettings = SerialSettings.Default with { Encoding = "utf-16be" },
             Notes =
             [
                 new Note(
@@ -52,6 +53,7 @@ public sealed class AppStateTests
         Assert.True(result.IsSuccess);
         Assert.Equal(noteId, service.State.ActiveNoteId);
         Assert.Equal("Тест", Assert.Single(service.State.Notes).Title);
+        Assert.Equal("utf-16be", service.State.SerialSettings.Encoding);
         Assert.Equal(0, store.WriteCount);
     }
 

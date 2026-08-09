@@ -99,8 +99,8 @@ export async function close() {
     isClosing = false;
 }
 
-async function readFromPort(port, callbackReference) {
-    const decoder = new TextDecoder("utf-8");
+async function readFromPort(port, encoding, callbackReference) {
+    const decoder = new TextDecoder(encoding);
 
     try {
         // Serial chunks are arbitrary. The nested-loop pattern handles recoverable
@@ -168,7 +168,7 @@ async function openPort(port, options, callbackReference) {
     activePort = port;
     dotNetReference = callbackReference;
     isClosing = false;
-    readLoopPromise = readFromPort(port, callbackReference);
+    readLoopPromise = readFromPort(port, options.encoding, callbackReference);
     return port.getInfo();
 }
 

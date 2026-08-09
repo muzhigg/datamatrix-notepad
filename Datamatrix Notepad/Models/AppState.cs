@@ -31,7 +31,7 @@ public sealed record SerialSettings(
         Parity: "none",
         StopBits: 1,
         FlowControl: "none",
-        Encoding: "utf-8",
+        Encoding: SerialConnectionOptions.Utf8Encoding,
         Prefix: string.Empty,
         Suffix: "\r\n");
 
@@ -42,6 +42,7 @@ public sealed record SerialSettings(
             Parity,
             StopBits,
             FlowControl,
+            Encoding,
             Prefix,
             Suffix);
 
@@ -57,9 +58,9 @@ public sealed record SerialSettings(
             throw new InvalidDataException("Port alias is too long.");
         }
 
-        if (!string.Equals(Encoding, "utf-8", StringComparison.OrdinalIgnoreCase))
+        if (!SerialConnectionOptions.IsSupportedEncoding(Encoding))
         {
-            throw new InvalidDataException("Only UTF-8 encoding is supported.");
+            throw new InvalidDataException("Only UTF-8 and UTF-16BE encodings are supported.");
         }
 
         ToConnectionOptions().Validate();

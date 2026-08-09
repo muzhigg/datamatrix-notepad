@@ -137,6 +137,7 @@ public static class SerialTextFormatter
 
         return value
             .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace(ScanTextNormalizer.GroupSeparator, "\\u001D", StringComparison.Ordinal)
             .Replace("\r", "\\r", StringComparison.Ordinal)
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace("\t", "\\t", StringComparison.Ordinal);
@@ -378,7 +379,11 @@ public sealed class SerialPortService(IJSRuntime jsRuntime) : IAsyncDisposable
 
         try
         {
-            var completedCodes = _frameParser.Append(chunk);
+            var completedCodes = _frameParser
+                .Append(chunk)
+                .Select(ScanTextNormalizer.NormalizeCompletedCode)
+                .Where(static code => code.Length > 0)
+                .ToArray();
             ChunkReceived?.Invoke(this, new SerialChunkEventArgs(chunk, completedCodes));
         }
         catch (InvalidDataException exception)

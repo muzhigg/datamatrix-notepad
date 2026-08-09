@@ -53,9 +53,9 @@ public sealed class SerialPortServiceTests
     [Fact]
     public void MakeControlCharactersVisible_EscapesDiagnosticCharacters()
     {
-        var result = SerialTextFormatter.MakeControlCharactersVisible("ABC\r\n\tDEF");
+        var result = SerialTextFormatter.MakeControlCharactersVisible("ABC\u001D\r\n\tDEF");
 
-        Assert.Equal(@"ABC\r\n\tDEF", result);
+        Assert.Equal(@"ABC\u001D\r\n\tDEF", result);
     }
 
     [Fact]
@@ -88,6 +88,43 @@ public sealed class SerialPortServiceTests
         }
 
         Assert.Equal("utf-16be", module.LastOpenOptions?.Encoding);
+    }
+
+    [Fact]
+    public async Task ReceiveChunkAsync_GroupSeparator_PreservesRawAndNormalizesCompletedCode()
+    {
+        var module = new RecordingSerialModule();
+        await using var service = new SerialPortService(new ModuleJsRuntime(module));
+        SerialChunkEventArgs? received = null;
+        service.ChunkReceived += (_, args) => received = args;
+
+        var connection = await service.SelectAndConnectAsync(SerialConnectionOptions.Default);
+        Assert.True(connection.IsConnected);
+
+        const string raw = "0108\u001D91EE11\u001D92\r\n";
+        await service.ReceiveChunkAsync(raw);
+
+        var actual = Assert.IsType<SerialChunkEventArgs>(received);
+        Assert.Equal(raw, actual.RawText);
+        Assert.Equal(["010891EE1192"], actual.CompletedCodes);
+    }
+
+    [Fact]
+    public async Task ReceiveChunkAsync_GroupSeparatorOnly_ProducesNoCompletedCodes()
+    {
+        var module = new RecordingSerialModule();
+        await using var service = new SerialPortService(new ModuleJsRuntime(module));
+        SerialChunkEventArgs? received = null;
+        service.ChunkReceived += (_, args) => received = args;
+
+        var connection = await service.SelectAndConnectAsync(SerialConnectionOptions.Default);
+        Assert.True(connection.IsConnected);
+
+        await service.ReceiveChunkAsync("\u001D\r\n");
+
+        var actual = Assert.IsType<SerialChunkEventArgs>(received);
+        Assert.Equal("\u001D\r\n", actual.RawText);
+        Assert.Empty(actual.CompletedCodes);
     }
 
     private sealed class ModuleJsRuntime(RecordingSerialModule module) : IJSRuntime

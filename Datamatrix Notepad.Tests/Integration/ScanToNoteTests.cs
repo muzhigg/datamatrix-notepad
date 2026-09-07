@@ -61,6 +61,18 @@ public sealed class ScanToNoteTests
     }
 
     [Fact]
+    public async Task AppendScannedCodesAsync_GroupSeparator_PreservesCharacterInNote()
+    {
+        var service = new AppStateService(new FakeAppStateStore());
+        await service.LoadAsync();
+        await service.CreateNoteAsync();
+
+        await service.AppendScannedCodesAsync(["01\u001D21"]);
+
+        Assert.Equal("01\u001D21", service.ActiveNote?.Content);
+    }
+
+    [Fact]
     public async Task AppendScannedCodesAsync_IgnoresEmptyCodes()
     {
         var store = new FakeAppStateStore();

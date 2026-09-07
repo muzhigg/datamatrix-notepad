@@ -382,6 +382,77 @@
 
 **Размер:** M, 4 файла.
 
+## T14. Streaming-декодирование UTF-16BE
+
+**Описание:** по результату аппаратной проверки дать пользователю выбор UTF-8 или UTF-16BE и декодировать COM-поток выбранной кодировкой без добавления нулевых символов в лог, заметку и экспорт.
+
+**Критерии приёмки:**
+
+- [x] UTF-8 остаётся кодировкой по умолчанию, а в настройках можно выбрать UTF-16BE.
+- [x] Выбранная кодировка автоматически сохраняется в `localStorage` и восстанавливается между сессиями.
+- [x] Ручное подключение и восстановление ранее разрешённого порта передают выбранную кодировку в JS.
+- [x] Один streaming `TextDecoder` выбранной кодировки используется на всё подключение, включая случай разделения UTF-16BE кодовой единицы между byte chunks.
+- [x] При UTF-16BE байты `00 30 00 31 00 0D 00 0A` дают завершённый код `01` без `U+0000`.
+- [x] Обработка `U+001D` не изменяется этой задачей.
+
+**Проверка:**
+
+- [x] Узкие тесты настроек и serial interop проходят.
+- [x] Полный `dotnet test`, `dotnet format` и Release build проходят.
+- [x] Пользователь повторяет скан реальным устройством с выбранной UTF-16BE и подтверждает отсутствие промежутков.
+
+**Зависимости:** T3, T7, T8, T13.
+
+**Предполагаемые файлы:**
+
+- `docs/spec.md`
+- `tasks/plan.md`
+- `tasks/todo.md`
+- `Datamatrix Notepad/Models/AppState.cs`
+- `Datamatrix Notepad/Services/Serial/SerialPortService.cs`
+- `Datamatrix Notepad/Pages/Settings.razor`
+- `Datamatrix Notepad/wwwroot/js/serial.js`
+- `Datamatrix Notepad.Tests/Serial/SerialSettingsTests.cs`
+- `Datamatrix Notepad.Tests/Serial/SerialPortServiceTests.cs`
+
+**Размер:** S, 9 файлов.
+
+## T15. Сохранение GS в завершённых кодах
+
+**Описание:** сохранять разделитель GS (`U+001D`) в завершённом коде, заметке и экспорте.
+
+**Критерии приёмки:**
+
+- [x] `[RAW]` сохраняет исходный `U+001D`, а диагностический форматтер показывает его как `\u001D`.
+- [x] Завершённый код передаётся подписчикам вместе со всеми `U+001D`.
+- [x] `[CODE]` показывает GS как `\u001D`; новые заметки и экспорт сохраняют сам `U+001D`.
+- [x] Завершённый код, состоящий только из GS, не считается пустым.
+- [x] Остальные символы входного кода не изменяются.
+
+**Проверка:**
+
+- [x] Узкие тесты диагностического форматтера и serial-сервиса проходят.
+- [x] Полный `dotnet test`, `dotnet format` и Release build проходят.
+- [ ] Реальный скан показывает `\u001D` в `[RAW]` и `[CODE]`; заметка и загруженный файл содержат `U+001D`.
+
+**Зависимости:** T3, T7, T8, T14.
+
+**Предполагаемые файлы:**
+
+- `docs/spec.md`
+- `docs/manual-test-checklist.md`
+- `tasks/plan.md`
+- `tasks/todo.md`
+- `README.md`
+- `Datamatrix Notepad/Services/Serial/ScanTextNormalizer.cs` (удалён)
+- `Datamatrix Notepad/Services/Serial/SerialPortService.cs`
+- `Datamatrix Notepad.Tests/Serial/ScanTextNormalizerTests.cs` (удалён)
+- `Datamatrix Notepad.Tests/Serial/SerialPortServiceTests.cs`
+- `Datamatrix Notepad.Tests/Integration/ScanToNoteTests.cs`
+- `Datamatrix Notepad.Tests/Export/NoteExportServiceTests.cs`
+
+**Размер:** S, 11 файлов.
+
 ## Контрольная точка D
 
 - [ ] T1–T13 выполнены.

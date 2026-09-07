@@ -16,7 +16,7 @@ public sealed class NoteExportServiceTests
         var note = new Note(
             Guid.NewGuid(),
             "Партия 00ЦБ-123456 от 25.07.2026",
-            "строка 1\nCODE-✓",
+            "строка 1\nCODE\u001D✓",
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow);
 
@@ -26,7 +26,7 @@ public sealed class NoteExportServiceTests
         var request = Assert.Single(downloader.Requests);
         Assert.Equal(fileName, request.FileName);
         Assert.Equal("text/plain;charset=utf-8", request.ContentType);
-        Assert.Equal("строка 1\nCODE-✓", request.Content);
+        Assert.Equal("строка 1\nCODE\u001D✓", request.Content);
     }
 
     [Fact]

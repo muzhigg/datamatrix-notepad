@@ -91,7 +91,7 @@ public sealed class SerialPortServiceTests
     }
 
     [Fact]
-    public async Task ReceiveChunkAsync_GroupSeparator_PreservesRawAndNormalizesCompletedCode()
+    public async Task ReceiveChunkAsync_GroupSeparator_PreservesCharacterForNote()
     {
         var module = new RecordingSerialModule();
         await using var service = new SerialPortService(new ModuleJsRuntime(module));
@@ -106,11 +106,11 @@ public sealed class SerialPortServiceTests
 
         var actual = Assert.IsType<SerialChunkEventArgs>(received);
         Assert.Equal(raw, actual.RawText);
-        Assert.Equal(["010891EE1192"], actual.CompletedCodes);
+        Assert.Equal(["0108\u001D91EE11\u001D92"], actual.CompletedCodes);
     }
 
     [Fact]
-    public async Task ReceiveChunkAsync_GroupSeparatorOnly_ProducesNoCompletedCodes()
+    public async Task ReceiveChunkAsync_GroupSeparatorOnly_ProducesCompletedCode()
     {
         var module = new RecordingSerialModule();
         await using var service = new SerialPortService(new ModuleJsRuntime(module));
@@ -124,7 +124,7 @@ public sealed class SerialPortServiceTests
 
         var actual = Assert.IsType<SerialChunkEventArgs>(received);
         Assert.Equal("\u001D\r\n", actual.RawText);
-        Assert.Empty(actual.CompletedCodes);
+        Assert.Equal(["\u001D"], actual.CompletedCodes);
     }
 
     private sealed class ModuleJsRuntime(RecordingSerialModule module) : IJSRuntime
